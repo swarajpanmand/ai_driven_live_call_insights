@@ -125,3 +125,5 @@ dmypy.json
 uploads/
 *.zip
 function.zip 
+
+node_modules/

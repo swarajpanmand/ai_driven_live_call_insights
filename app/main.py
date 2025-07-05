@@ -1,5 +1,5 @@
 from fastapi import FastAPI, File, UploadFile, HTTPException
-from fastapi.responses import JSONResponse, HTMLResponse
+from fastapi.responses import JSONResponse, HTMLResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from .transcribe import start_transcription
 from .comprehend import analyze_text
@@ -64,6 +64,10 @@ async def health_check():
 async def root():
     with open(os.path.join(os.path.dirname(__file__), "../templates/index.html")) as f:
         return f.read()
+
+@app.get("/manifest.json")
+async def get_manifest():
+    return FileResponse("frontend/public/manifest.json")
 
 def get_transcript_text(transcript_url):
     response = requests.get(transcript_url)
