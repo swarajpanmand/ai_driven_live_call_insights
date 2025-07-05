@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>AI-Driven Call Insights</title>
+</head>
+<body>
+    <h1>Upload Audio for Transcription and Insights</h1>
+    <input type="file" id="audioFile" accept="audio/*">
+    <button onclick="uploadAudio()">Upload</button>
+    <h2>Transcript</h2>
+    <pre id="transcript"></pre>
+    <h2>Insights</h2>
+    <pre id="insights"></pre>
+
+    <script>
+        async function uploadAudio() {
+            const fileInput = document.getElementById("audioFile");
+            const formData = new FormData();
+            formData.append("file", fileInput.files[0]);
+
+            const response = await fetch("http://localhost:8000/start-transcription/", {
+                method: "POST",
+                body: formData
+            });
+            const result = await response.json();
+            document.getElementById("transcript").innerText = result.transcription;
+            document.getElementById("insights").innerText = JSON.stringify(result.insights, null, 2);
+        }
+    </script>
+</body>
+</html> 
