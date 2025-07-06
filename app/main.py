@@ -1,8 +1,9 @@
-from fastapi import FastAPI, File, UploadFile, HTTPException
+from fastapi import FastAPI, File, UploadFile, HTTPException, WebSocket
 from fastapi.responses import JSONResponse, HTMLResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from .transcribe import start_transcription
 from .comprehend import analyze_text
+from .websocket_handler import websocket_endpoint
 import asyncio
 import boto3
 import os
@@ -25,6 +26,11 @@ transcribe_client = boto3.client("transcribe", region_name="ap-south-1")
 comprehend_client = boto3.client("comprehend", region_name="ap-south-1")
 s3_client = boto3.client("s3", region_name="ap-south-1")
 S3_BUCKET = "callinsightawsgenai"
+
+# WebSocket endpoint for real-time call insights
+@app.websocket("/ws/live-call/{session_id}")
+async def websocket_endpoint_route(websocket: WebSocket, session_id: str):
+    await websocket_endpoint(websocket, session_id)
 
 @app.post("/start-transcription/")
 async def transcribe_audio(file: UploadFile = File(...)):
@@ -68,6 +74,32 @@ async def root():
 @app.get("/manifest.json")
 async def get_manifest():
     return FileResponse("frontend/public/manifest.json")
+
+# Live call insights endpoints
+@app.post("/start-live-call/")
+async def start_live_call():
+    """Start a new live call session"""
+    session_id = str(uuid.uuid4())
+    return {
+        "session_id": session_id,
+        "websocket_url": f"ws://localhost:8000/ws/live-call/{session_id}",
+        "status": "ready"
+    }
+
+@app.get("/call-insights/{session_id}")
+async def get_call_insights(session_id: str):
+    """Get insights for a specific call session"""
+    # This would return insights from the session
+    return {
+        "session_id": session_id,
+        "insights": {
+            "total_duration": "00:05:30",
+            "customer_sentiment": "positive",
+            "urgency_level": "medium",
+            "action_items": ["refund", "escalation"],
+            "keywords": ["billing", "payment", "issue"]
+        }
+    }
 
 def get_transcript_text(transcript_url):
     response = requests.get(transcript_url)

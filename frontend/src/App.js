@@ -1,9 +1,11 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Brain, AlertCircle, Loader } from 'lucide-react';
+import { Brain, AlertCircle, Loader, Phone, Upload } from 'lucide-react';
 import AudioUploader from './components/AudioUploader';
 import TranscriptionDisplay from './components/TranscriptionDisplay';
 import InsightsDisplay from './components/InsightsDisplay';
+import LiveCallInterface from './components/LiveCallInterface';
+import TestInstructions from './components/TestInstructions';
 import './App.css';
 
 function App() {
@@ -11,6 +13,7 @@ function App() {
   const [transcription, setTranscription] = useState('');
   const [insights, setInsights] = useState(null);
   const [error, setError] = useState('');
+  const [mode, setMode] = useState('upload'); // 'upload' or 'live'
 
   const handleFileUpload = async (file) => {
     console.log('File uploaded:', file);
@@ -68,54 +71,102 @@ function App() {
 
       <main className="main-content">
         <div className="container">
+          {/* Mode Toggle */}
           <motion.div 
-            className="upload-section"
+            className="mode-toggle"
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.6, delay: 0.2 }}
+            transition={{ duration: 0.6, delay: 0.1 }}
           >
-            <AudioUploader 
-              onFileUpload={handleFileUpload}
-              isProcessing={isProcessing}
-            />
+            <div className="toggle-buttons">
+              <button 
+                className={`toggle-btn ${mode === 'upload' ? 'active' : ''}`}
+                onClick={() => setMode('upload')}
+              >
+                <Upload size={20} />
+                File Upload
+              </button>
+              <button 
+                className={`toggle-btn ${mode === 'live' ? 'active' : ''}`}
+                onClick={() => setMode('live')}
+              >
+                <Phone size={20} />
+                Live Call
+              </button>
+            </div>
           </motion.div>
 
-          <AnimatePresence>
-            {isProcessing && (
+          <AnimatePresence mode="wait">
+            {mode === 'upload' ? (
               <motion.div 
-                className="processing-indicator"
-                initial={{ opacity: 0, scale: 0.8 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.8 }}
+                key="upload-mode"
+                initial={{ opacity: 0, x: -20 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: 20 }}
                 transition={{ duration: 0.3 }}
               >
-                <Loader className="spinner" />
-                <p>Processing audio and generating insights...</p>
-              </motion.div>
-            )}
+                <motion.div 
+                  className="upload-section"
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.6, delay: 0.2 }}
+                >
+                  <AudioUploader 
+                    onFileUpload={handleFileUpload}
+                    isProcessing={isProcessing}
+                  />
+                </motion.div>
 
-            {error && (
+                <AnimatePresence>
+                  {isProcessing && (
+                    <motion.div 
+                      className="processing-indicator"
+                      initial={{ opacity: 0, scale: 0.8 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      exit={{ opacity: 0, scale: 0.8 }}
+                      transition={{ duration: 0.3 }}
+                    >
+                      <Loader className="spinner" />
+                      <p>Processing audio and generating insights...</p>
+                    </motion.div>
+                  )}
+
+                  {error && (
+                    <motion.div 
+                      className="error-message"
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -10 }}
+                      transition={{ duration: 0.3 }}
+                    >
+                      <AlertCircle className="error-icon" />
+                      <p>{error}</p>
+                    </motion.div>
+                  )}
+
+                  {transcription && (
+                    <motion.div 
+                      className="results-section"
+                      initial={{ opacity: 0, y: 20 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ duration: 0.6, delay: 0.1 }}
+                    >
+                      <TranscriptionDisplay transcription={transcription} />
+                      {insights && <InsightsDisplay insights={insights} />}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </motion.div>
+            ) : (
               <motion.div 
-                className="error-message"
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -10 }}
+                key="live-mode"
+                initial={{ opacity: 0, x: 20 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -20 }}
                 transition={{ duration: 0.3 }}
               >
-                <AlertCircle className="error-icon" />
-                <p>{error}</p>
-              </motion.div>
-            )}
-
-            {transcription && (
-              <motion.div 
-                className="results-section"
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.6, delay: 0.1 }}
-              >
-                <TranscriptionDisplay transcription={transcription} />
-                {insights && <InsightsDisplay insights={insights} />}
+                <TestInstructions />
+                <LiveCallInterface />
               </motion.div>
             )}
           </AnimatePresence>
