@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { motion } from 'framer-motion';
-import { Mic, Square, Download } from 'lucide-react';
+import { Mic, Square, Download, AlertCircle, CheckCircle, Clock } from 'lucide-react';
 
 const MeetTranscriber = () => {
   const [isRecording, setIsRecording] = useState(false);
@@ -63,12 +63,7 @@ const MeetTranscriber = () => {
       // Start recording
       recorder.record();
       console.log("🎙 Recording started...");
-      setStatus('🎙 Recording for 5 seconds...');
-
-      // Stop after 5 seconds and process
-      setTimeout(() => {
-        stopRecording();
-      }, 5000);
+      setStatus('🎙 Recording... Click "Stop Recording" when done');
       
     } catch (err) {
       console.error("❌ Failed to capture audio:", err);
@@ -174,28 +169,36 @@ const MeetTranscriber = () => {
       transition={{ duration: 0.6 }}
     >
       <div className="meet-transcriber-header">
-        <h2>🎙️ Google Meet Audio Transcriber</h2>
-        <p>Capture and transcribe audio from Google Meet tabs</p>
+        <div className="header-icon">
+          <Mic size={32} />
+        </div>
+        <h2>Google Meet Audio Transcriber</h2>
+        <p>Capture and transcribe audio from Google Meet tabs in real-time</p>
       </div>
 
-      <div className="instructions">
-        <h3>📋 How to use:</h3>
-        <ol>
-          <li>Click "Start Recording" button</li>
-          <li>Select the Google Meet tab when prompted</li>
-          <li><strong>Important:</strong> Make sure to check "Share audio" when selecting the tab</li>
-          <li>The system will record for 5 seconds and transcribe the audio</li>
-          <li>View the transcription results below</li>
-        </ol>
+      <div className="instructions-card">
+        <div className="card-header">
+          <Clock size={20} />
+          <h3>How to use</h3>
+        </div>
+        <div className="instructions-content">
+          <ol>
+            <li>Click the "Start Recording" button below</li>
+            <li>Select the Google Meet tab when prompted by your browser</li>
+            <li><strong>Important:</strong> Make sure to check "Share audio" when selecting the tab</li>
+            <li>Click "Stop Recording" when you want to end the recording</li>
+            <li>View the transcription results in the panel below</li>
+          </ol>
+        </div>
       </div>
 
-      <div className="controls">
+      <div className="controls-section">
         <motion.button
-          className={`record-btn ${isRecording ? 'recording' : ''}`}
+          className={`record-button ${isRecording ? 'recording' : ''}`}
           onClick={isRecording ? stopRecording : startRecording}
           disabled={isProcessing}
-          whileHover={{ scale: 1.05 }}
-          whileTap={{ scale: 0.95 }}
+          whileHover={{ scale: 1.02 }}
+          whileTap={{ scale: 0.98 }}
         >
           {isRecording ? (
             <>
@@ -212,41 +215,27 @@ const MeetTranscriber = () => {
 
         {transcription && (
           <motion.button
-            className="download-btn"
+            className="download-button"
             onClick={downloadTranscription}
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.95 }}
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
           >
             <Download size={20} />
             Download
           </motion.button>
         )}
-
-        {error && error.includes('Audio recording library failed to load') && (
-          <motion.button
-            className="retry-btn"
-            onClick={() => {
-              setError('');
-              loadRecorderJS().then(() => {
-                setStatus('✅ Recorder.js loaded successfully. Try recording again.');
-              }).catch(err => {
-                setError('Failed to load recording library. Please refresh the page.');
-              });
-            }}
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.95 }}
-          >
-            🔄 Retry Loading Library
-          </motion.button>
-        )}
       </div>
 
-      <div className={`status ${error ? 'error' : ''} ${isRecording ? 'recording' : ''}`}>
-        {status}
+      <div className={`status-indicator ${error ? 'error' : ''} ${isRecording ? 'recording' : ''} ${isProcessing ? 'processing' : ''}`}>
+        <div className="status-icon">
+          {error ? <AlertCircle size={20} /> : 
+           isRecording ? <Mic size={20} /> : 
+           isProcessing ? <Clock size={20} /> : 
+           <CheckCircle size={20} />}
+        </div>
+        <span className="status-text">{status}</span>
       </div>
 
       {error && (
@@ -255,17 +244,21 @@ const MeetTranscriber = () => {
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
         >
-          ❌ {error}
+          <AlertCircle size={20} />
+          <span>{error}</span>
         </motion.div>
       )}
 
       {transcription && (
         <motion.div 
-          className="transcription-result"
+          className="transcription-card"
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
         >
-          <h3>📝 Transcription Result:</h3>
+          <div className="card-header">
+            <Mic size={20} />
+            <h3>Transcription Result</h3>
+          </div>
           <div className="transcription-text">
             {transcription}
           </div>
@@ -274,159 +267,222 @@ const MeetTranscriber = () => {
 
       <style jsx>{`
         .meet-transcriber {
-          background: rgba(255, 255, 255, 0.1);
-          border-radius: 15px;
-          padding: 25px;
-          margin: 20px 0;
-          backdrop-filter: blur(10px);
+          background: rgba(255, 255, 255, 0.95);
+          border-radius: 1.5rem;
+          padding: 3rem;
+          box-shadow: var(--shadow-lg);
+          margin: 2rem 0;
         }
 
         .meet-transcriber-header {
           text-align: center;
-          margin-bottom: 20px;
+          margin-bottom: 2rem;
+        }
+
+        .header-icon {
+          display: flex;
+          justify-content: center;
+          margin-bottom: 1rem;
+          color: var(--primary-color);
         }
 
         .meet-transcriber-header h2 {
-          margin: 0 0 10px 0;
-          color: #ffd700;
+          margin: 0 0 0.5rem 0;
+          color: var(--text-primary);
+          font-size: 2rem;
+          font-weight: 700;
         }
 
         .meet-transcriber-header p {
           margin: 0;
-          opacity: 0.8;
+          color: var(--text-secondary);
+          font-size: 1.1rem;
         }
 
-        .instructions {
-          background: rgba(255, 255, 255, 0.1);
-          padding: 20px;
-          border-radius: 10px;
-          margin: 20px 0;
+        .instructions-card {
+          background: rgba(255, 255, 255, 0.5);
+          border-radius: 1rem;
+          padding: 1.5rem;
+          margin: 2rem 0;
+          border: 1px solid rgba(0, 0, 0, 0.1);
         }
 
-        .instructions h3 {
-          margin-top: 0;
-          color: #ffd700;
-        }
-
-        .instructions ol {
-          margin: 0;
-          padding-left: 20px;
-        }
-
-        .instructions li {
-          margin: 10px 0;
-          line-height: 1.5;
-        }
-
-        .controls {
+        .card-header {
           display: flex;
-          gap: 15px;
+          align-items: center;
+          gap: 0.75rem;
+          margin-bottom: 1rem;
+          color: var(--text-primary);
+        }
+
+        .card-header h3 {
+          margin: 0;
+          font-size: 1.25rem;
+          font-weight: 600;
+        }
+
+        .instructions-content ol {
+          margin: 0;
+          padding-left: 1.5rem;
+          color: var(--text-secondary);
+        }
+
+        .instructions-content li {
+          margin: 0.75rem 0;
+          line-height: 1.6;
+        }
+
+        .controls-section {
+          display: flex;
+          gap: 1rem;
           justify-content: center;
-          margin: 20px 0;
+          margin: 2rem 0;
           flex-wrap: wrap;
         }
 
-        .record-btn, .download-btn {
+        .record-button, .download-button {
           display: flex;
           align-items: center;
-          gap: 8px;
-          padding: 12px 24px;
+          gap: 0.5rem;
+          padding: 0.875rem 1.75rem;
           border: none;
-          border-radius: 25px;
-          font-size: 1em;
+          border-radius: 0.75rem;
+          font-size: 1rem;
+          font-weight: 600;
           cursor: pointer;
           transition: all 0.3s ease;
-          font-weight: bold;
-          text-transform: uppercase;
-          letter-spacing: 1px;
+          box-shadow: var(--shadow-sm);
         }
 
-        .record-btn {
-          background: linear-gradient(45deg, #ff6b6b, #ee5a24);
+        .record-button {
+          background: var(--primary-color);
           color: white;
         }
 
-        .record-btn.recording {
-          background: linear-gradient(45deg, #ff4757, #ff3838);
+        .record-button:hover:not(:disabled) {
+          background: var(--primary-dark);
+          box-shadow: var(--shadow-md);
+        }
+
+        .record-button.recording {
+          background: var(--error-color);
           animation: pulse 1s infinite;
         }
 
-        .download-btn {
-          background: linear-gradient(45deg, #2ed573, #1e90ff);
+        .download-button {
+          background: var(--success-color);
           color: white;
         }
 
-        .record-btn:disabled, .download-btn:disabled {
-          background: #666;
+        .download-button:hover {
+          background: var(--success-dark);
+          box-shadow: var(--shadow-md);
+        }
+
+        .record-button:disabled, .download-button:disabled {
+          background: var(--text-tertiary);
           cursor: not-allowed;
           animation: none;
         }
 
-        .retry-btn {
-          background: linear-gradient(45deg, #ffa500, #ff8c00);
-          color: white;
-        }
-
         @keyframes pulse {
           0% { opacity: 1; }
-          50% { opacity: 0.7; }
+          50% { opacity: 0.8; }
           100% { opacity: 1; }
         }
 
-        .status {
-          background: rgba(255, 255, 255, 0.2);
-          padding: 15px;
-          border-radius: 10px;
-          margin: 20px 0;
-          text-align: center;
-          font-weight: bold;
-          font-size: 1.1em;
+        .status-indicator {
+          display: flex;
+          align-items: center;
+          gap: 0.75rem;
+          padding: 1rem 1.5rem;
+          border-radius: 0.75rem;
+          margin: 2rem 0;
+          font-weight: 500;
         }
 
-        .status.error {
-          background: rgba(255, 0, 0, 0.2);
-          border: 1px solid #ff0000;
-          color: #ffcccc;
+        .status-indicator:not(.error):not(.recording):not(.processing) {
+          background: rgba(34, 197, 94, 0.1);
+          border: 1px solid rgba(34, 197, 94, 0.3);
+          color: var(--success-color);
         }
 
-        .status.recording {
-          background: rgba(255, 165, 0, 0.2);
-          border: 1px solid #ffa500;
-          color: #ffd700;
+        .status-indicator.recording {
+          background: rgba(239, 68, 68, 0.1);
+          border: 1px solid rgba(239, 68, 68, 0.3);
+          color: var(--error-color);
           animation: pulse 1s infinite;
         }
 
+        .status-indicator.processing {
+          background: rgba(59, 130, 246, 0.1);
+          border: 1px solid rgba(59, 130, 246, 0.3);
+          color: var(--primary-color);
+        }
+
+        .status-indicator.error {
+          background: rgba(239, 68, 68, 0.1);
+          border: 1px solid rgba(239, 68, 68, 0.3);
+          color: var(--error-color);
+        }
+
+        .status-icon {
+          flex-shrink: 0;
+        }
+
+        .status-text {
+          font-size: 1rem;
+        }
+
         .error-message {
-          background: rgba(255, 0, 0, 0.2);
-          border: 1px solid #ff0000;
-          color: #ffcccc;
-          padding: 15px;
-          border-radius: 10px;
-          margin: 20px 0;
+          display: flex;
+          align-items: center;
+          gap: 0.75rem;
+          padding: 1rem 1.5rem;
+          background: rgba(239, 68, 68, 0.1);
+          border: 1px solid rgba(239, 68, 68, 0.3);
+          border-radius: 0.75rem;
+          margin: 2rem 0;
+          color: var(--error-color);
         }
 
-        .transcription-result {
-          background: rgba(255, 255, 255, 0.1);
-          padding: 20px;
-          border-radius: 10px;
-          margin: 20px 0;
-        }
-
-        .transcription-result h3 {
-          margin-top: 0;
-          color: #ffd700;
+        .transcription-card {
+          background: rgba(255, 255, 255, 0.5);
+          border-radius: 1rem;
+          padding: 1.5rem;
+          margin: 2rem 0;
+          border: 1px solid rgba(0, 0, 0, 0.1);
         }
 
         .transcription-text {
-          background: rgba(255, 255, 255, 0.1);
-          padding: 15px;
-          border-radius: 8px;
+          background: rgba(0, 0, 0, 0.05);
+          padding: 1.5rem;
+          border-radius: 0.75rem;
           white-space: pre-wrap;
           font-family: 'Courier New', monospace;
-          font-size: 1em;
+          font-size: 1rem;
           line-height: 1.6;
-          max-height: 300px;
+          max-height: 400px;
           overflow-y: auto;
+          color: var(--text-primary);
+          border: 1px solid rgba(0, 0, 0, 0.1);
+        }
+
+        @media (max-width: 768px) {
+          .meet-transcriber {
+            padding: 2rem 1.5rem;
+          }
+          
+          .controls-section {
+            flex-direction: column;
+            align-items: center;
+          }
+          
+          .record-button, .download-button {
+            width: 100%;
+            max-width: 300px;
+            justify-content: center;
+          }
         }
       `}</style>
     </motion.div>
