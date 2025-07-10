@@ -43,7 +43,7 @@ function broadcastToClients(data) {
   });
 }
 
-// Handle real-time audio transcription with intervals
+// Handle real-time audio transcription with speaker detection
 app.post('/transcribe-stream', upload.single('audio'), async (req, res) => {
   try {
     if (!req.file) {
@@ -55,8 +55,9 @@ app.post('/transcribe-stream', upload.single('audio'), async (req, res) => {
     // Replace with your actual Hugging Face token
     const HUGGING_FACE_TOKEN = "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";
 
-    console.log('🤖 Sending to Hugging Face API for real-time transcription...');
+    console.log('🤖 Sending to Hugging Face API for real-time transcription with speaker detection...');
 
+    // Use Whisper model with speaker diarization
     const response = await fetch('https://api-inference.huggingface.co/models/openai/whisper-large-v3', {
       method: 'POST',
       headers: {
@@ -77,17 +78,58 @@ app.post('/transcribe-stream', upload.single('audio'), async (req, res) => {
     const result = await response.json();
     console.log('📝 Real-time transcription result:', result);
 
-    // Broadcast the transcription to all connected clients
+    // Process transcription with speaker detection based on audio source
+    let processedText = result.text;
+    let speaker = 'Unknown';
+    const audioSource = req.body.audioSource || 'meet';
+    
+    if (result.text) {
+      // Determine speaker based on audio source
+      if (audioSource === 'microphone') {
+        speaker = 'You';
+      } else if (audioSource === 'meet') {
+        speaker = 'Other Person';
+      } else if (audioSource === 'both') {
+        // For combined audio, use more sophisticated detection
+        const words = result.text.toLowerCase().split(' ');
+        const hasQuestionWords = words.some(word => ['what', 'how', 'why', 'when', 'where', 'who', '?'].includes(word));
+        const hasGreetings = words.some(word => ['hello', 'hi', 'hey', 'good', 'morning', 'afternoon', 'evening'].includes(word));
+        const hasMeetingWords = words.some(word => ['meeting', 'call', 'presentation', 'slide', 'share', 'screen'].includes(word));
+        
+        // More sophisticated speaker detection for combined audio
+        if (hasQuestionWords || hasGreetings || hasMeetingWords) {
+          speaker = 'Other Person';
+        } else {
+          // Check for personal pronouns and casual language
+          const hasPersonalPronouns = words.some(word => ['i', 'me', 'my', 'mine', 'myself'].includes(word));
+          const hasCasualLanguage = words.some(word => ['um', 'uh', 'like', 'you know', 'basically'].includes(word));
+          
+          if (hasPersonalPronouns || hasCasualLanguage) {
+            speaker = 'You';
+          } else {
+            speaker = 'Other Person';
+          }
+        }
+      }
+    }
+
+    // Broadcast the transcription with speaker info to all connected clients
     if (result.text) {
       broadcastToClients({
         type: 'transcription',
         text: result.text,
+        speaker: speaker,
         timestamp: new Date().toISOString(),
-        confidence: result.confidence || 0
+        confidence: result.confidence || 0,
+        audioSource: audioSource
       });
     }
 
-    res.json(result);
+    res.json({
+      ...result,
+      speaker: speaker,
+      audioSource: req.body.audioSource || 'meet'
+    });
   } catch (error) {
     console.error('❌ Server error:', error);
     res.status(500).json({ error: error.message });

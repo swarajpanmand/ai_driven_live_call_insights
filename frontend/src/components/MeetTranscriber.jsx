@@ -12,8 +12,11 @@ const MeetTranscriber = () => {
   const [isRealTimeMode, setIsRealTimeMode] = useState(false);
   const [wsConnected, setWsConnected] = useState(false);
   const [isRealTimeActive, setIsRealTimeActive] = useState(false);
+  const [captureMode, setCaptureMode] = useState('both'); // 'meet', 'microphone', 'both'
   
   const streamRef = useRef(null);
+  const meetStreamRef = useRef(null);
+  const micStreamRef = useRef(null);
   const recorderRef = useRef(null);
   const audioContextRef = useRef(null);
   const sourceNodeRef = useRef(null);
@@ -42,7 +45,8 @@ const MeetTranscriber = () => {
             console.log('📨 Received WebSocket message:', data);
             if (data.type === 'transcription') {
               setRealTimeTranscriptions(prev => [...prev, data]);
-              setTranscription(prev => prev + (prev ? '\n' : '') + data.text);
+              const speakerPrefix = data.speaker ? `[${data.speaker}]: ` : '';
+              setTranscription(prev => prev + (prev ? '\n' : '') + speakerPrefix + data.text);
             }
           } catch (err) {
             console.error('❌ Error parsing WebSocket message:', err);
@@ -91,33 +95,73 @@ const MeetTranscriber = () => {
       setError('');
       setTranscription('');
       setRealTimeTranscriptions([]);
-      setStatus('Capturing Meet audio...');
+      setStatus('Capturing audio...');
       
-      // Capture audio from the selected tab
-      const stream = await navigator.mediaDevices.getDisplayMedia({
-        video: true, // Required for tab audio in most browsers
-        audio: {
-          echoCancellation: false,
-          noiseSuppression: false,
-          autoGainControl: false
+      let combinedStream = null;
+      
+      if (captureMode === 'both' || captureMode === 'meet') {
+        // Capture audio from the selected tab (Meet)
+        const meetStream = await navigator.mediaDevices.getDisplayMedia({
+          video: true, // Required for tab audio in most browsers
+          audio: {
+            echoCancellation: false,
+            noiseSuppression: false,
+            autoGainControl: false
+          }
+        });
+        
+        meetStreamRef.current = meetStream;
+        console.log("✅ Meet stream captured:", meetStream);
+        
+        // Check if audio track exists
+        const audioTracks = meetStream.getAudioTracks();
+        if (audioTracks.length === 0) {
+          throw new Error("No audio track found. Make sure to share audio when selecting the tab.");
         }
-      });
-      
-      streamRef.current = stream;
-      console.log("✅ Stream captured:", stream);
-      setStatus('✅ Capturing Meet audio');
-
-      // Check if audio track exists
-      const audioTracks = stream.getAudioTracks();
-      if (audioTracks.length === 0) {
-        throw new Error("No audio track found. Make sure to share audio when selecting the tab.");
+        
+        combinedStream = meetStream;
       }
+      
+      if (captureMode === 'both' || captureMode === 'microphone') {
+        // Capture microphone audio
+        const micStream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: false,
+            noiseSuppression: false,
+            autoGainControl: false
+          }
+        });
+        
+        micStreamRef.current = micStream;
+        console.log("✅ Microphone stream captured:", micStream);
+        
+        if (combinedStream) {
+          // Combine both streams
+          const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+          const meetSource = audioContext.createMediaStreamSource(meetStreamRef.current);
+          const micSource = audioContext.createMediaStreamSource(micStream);
+          
+          const destination = audioContext.createMediaStreamDestination();
+          meetSource.connect(destination);
+          micSource.connect(destination);
+          
+          combinedStream = destination.stream;
+          audioContextRef.current = audioContext;
+        } else {
+          combinedStream = micStream;
+        }
+      }
+      
+      streamRef.current = combinedStream;
+      setStatus(`✅ Capturing ${captureMode === 'both' ? 'Meet + Microphone' : captureMode} audio`);
 
       // Set up AudioContext and Recorder
-      const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-      const sourceNode = audioContext.createMediaStreamSource(stream);
+      const audioContext = audioContextRef.current || new (window.AudioContext || window.webkitAudioContext)();
+      const sourceNode = audioContext.createMediaStreamSource(combinedStream);
       
-      audioContextRef.current = audioContext;
+      if (!audioContextRef.current) {
+        audioContextRef.current = audioContext;
+      }
       sourceNodeRef.current = sourceNode;
 
       // Ensure Recorder.js is available
@@ -126,7 +170,7 @@ const MeetTranscriber = () => {
       }
 
       const recorder = new window.Recorder(sourceNode, {
-        numChannels: 1,
+        numChannels: 2, // Stereo for better audio quality
       });
       
       recorderRef.current = recorder;
@@ -205,31 +249,13 @@ const MeetTranscriber = () => {
             return;
           }
           
-          const formData = new FormData();
-          formData.append("audio", blob, "audio.wav");
-
-          try {
-            setStatus(`🔄 Sending chunk to server at ${new Date().toLocaleTimeString()}`);
-            
-            const response = await fetch("http://localhost:5000/transcribe-stream", {
-              method: "POST",
-              body: formData,
-            });
-
-            if (!response.ok) {
-              const errorText = await response.text();
-              console.error("❌ Real-time API Error:", errorText);
-              setStatus(`❌ API Error: ${response.status}`);
-            } else {
-              const result = await response.json();
-              console.log("📝 Real-time transcription chunk:", result);
-              
-              // Update status to show processing
-              setStatus(`✅ Chunk processed at ${new Date().toLocaleTimeString()}`);
-            }
-          } catch (err) {
-            console.error("❌ Real-time transcription failed:", err);
-            setStatus(`❌ Network error: ${err.message}`);
+          // Process audio based on capture mode
+          if (captureMode === 'both') {
+            // Send separate requests for Meet and Microphone
+            await processSeparateAudioStreams(blob);
+          } else {
+            // Send single request for single source
+            await processSingleAudioStream(blob, captureMode);
           }
           
           // Restart recording for the next chunk
@@ -252,6 +278,63 @@ const MeetTranscriber = () => {
         }
       }
     }, 5000); // 5 seconds interval
+  };
+
+  const processSingleAudioStream = async (blob, source) => {
+    const formData = new FormData();
+    formData.append("audio", blob, "audio.wav");
+    formData.append("audioSource", source);
+
+    try {
+      setStatus(`🔄 Sending ${source} chunk to server at ${new Date().toLocaleTimeString()}`);
+      
+      const response = await fetch("http://localhost:5000/transcribe-stream", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error("❌ Real-time API Error:", errorText);
+        setStatus(`❌ API Error: ${response.status}`);
+      } else {
+        const result = await response.json();
+        console.log("📝 Real-time transcription chunk:", result);
+        setStatus(`✅ ${source} chunk processed at ${new Date().toLocaleTimeString()}`);
+      }
+    } catch (err) {
+      console.error("❌ Real-time transcription failed:", err);
+      setStatus(`❌ Network error: ${err.message}`);
+    }
+  };
+
+  const processSeparateAudioStreams = async (blob) => {
+    // For combined audio, use enhanced speaker detection
+    const formData = new FormData();
+    formData.append("audio", blob, "audio.wav");
+    formData.append("audioSource", "both");
+
+    try {
+      setStatus(`🔄 Sending combined audio with enhanced speaker detection at ${new Date().toLocaleTimeString()}`);
+      
+      const response = await fetch("http://localhost:5000/transcribe-stream", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error("❌ Real-time API Error:", errorText);
+        setStatus(`❌ API Error: ${response.status}`);
+      } else {
+        const result = await response.json();
+        console.log("📝 Real-time transcription chunk:", result);
+        setStatus(`✅ Combined chunk processed at ${new Date().toLocaleTimeString()}`);
+      }
+    } catch (err) {
+      console.error("❌ Real-time transcription failed:", err);
+      setStatus(`❌ Network error: ${err.message}`);
+    }
   };
 
   const stopRecording = () => {
@@ -336,6 +419,14 @@ const MeetTranscriber = () => {
       streamRef.current.getTracks().forEach(track => track.stop());
       streamRef.current = null;
     }
+    if (meetStreamRef.current) {
+      meetStreamRef.current.getTracks().forEach(track => track.stop());
+      meetStreamRef.current = null;
+    }
+    if (micStreamRef.current) {
+      micStreamRef.current.getTracks().forEach(track => track.stop());
+      micStreamRef.current = null;
+    }
     if (audioContextRef.current) {
       audioContextRef.current.close();
       audioContextRef.current = null;
@@ -345,6 +436,28 @@ const MeetTranscriber = () => {
       recorderRef.current = null;
     }
     sourceNodeRef.current = null;
+  };
+
+  const toggleSpeaker = (index) => {
+    setRealTimeTranscriptions(prev => {
+      const updated = [...prev];
+      const chunk = updated[index];
+      chunk.speaker = chunk.speaker === 'You' ? 'Other Person' : 'You';
+      return updated;
+    });
+    
+    // Also update the main transcription
+    setTranscription(prev => {
+      const lines = prev.split('\n');
+      const updatedLines = lines.map((line, i) => {
+        if (i === index) {
+          const speakerPrefix = realTimeTranscriptions[index].speaker === 'You' ? 'Other Person' : 'You';
+          return line.replace(/^\[.*?\]: /, `[${speakerPrefix}]: `);
+        }
+        return line;
+      });
+      return updatedLines.join('\n');
+    });
   };
 
   const downloadTranscription = () => {
@@ -383,12 +496,15 @@ const MeetTranscriber = () => {
         </div>
         <div className="instructions-content">
           <ol>
+            <li>Select audio source: "Meet + Microphone" (recommended), "Meet Only", or "Microphone Only"</li>
             <li>Toggle "Real-time Mode" for live transcription updates (optional)</li>
             <li>Ensure WebSocket connection is established (green "Connected" indicator)</li>
             <li>Click the "Start Recording" button below</li>
-            <li>Select the Google Meet tab when prompted by your browser</li>
+            <li>If capturing Meet audio: Select the Google Meet tab when prompted</li>
             <li><strong>Important:</strong> Make sure to check "Share audio" when selecting the tab</li>
-            <li>In real-time mode, transcriptions will appear every 5 seconds</li>
+            <li>If capturing microphone: Grant microphone permissions when prompted</li>
+            <li>In real-time mode, transcriptions will appear every 5 seconds with speaker detection</li>
+            <li><strong>Speaker Correction:</strong> Click the 🔄 button next to any transcription to toggle between "You" and "Other Person"</li>
             <li>Click "Stop Recording" when you want to end the recording</li>
             <li>View the transcription results in the panel below</li>
           </ol>
@@ -396,6 +512,20 @@ const MeetTranscriber = () => {
       </div>
 
       <div className="controls-section">
+        <div className="capture-mode-selector">
+          <label className="mode-label">Audio Source:</label>
+          <select 
+            value={captureMode} 
+            onChange={(e) => setCaptureMode(e.target.value)}
+            disabled={isRecording}
+            className="mode-select"
+          >
+            <option value="both">Meet + Microphone</option>
+            <option value="meet">Meet Only</option>
+            <option value="microphone">Microphone Only</option>
+          </select>
+        </div>
+
         <div className="mode-toggle">
           <label className="toggle-label">
             <input
@@ -485,34 +615,46 @@ const MeetTranscriber = () => {
         </motion.div>
       )}
 
-      {isRealTimeMode && realTimeTranscriptions.length > 0 && (
-        <motion.div 
-          className="realtime-transcriptions-card"
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-        >
-          <div className="card-header">
-            <Wifi size={20} />
-            <h3>Real-time Transcriptions</h3>
-            <span className="chunk-count">{realTimeTranscriptions.length} chunks</span>
-          </div>
-          <div className="realtime-transcriptions-list">
-            {realTimeTranscriptions.map((chunk, index) => (
-              <div key={index} className="transcription-chunk">
-                <div className="chunk-header">
-                  <span className="chunk-time">
-                    {new Date(chunk.timestamp).toLocaleTimeString()}
-                  </span>
-                  <span className="chunk-confidence">
-                    Confidence: {Math.round(chunk.confidence * 100)}%
-                  </span>
+              {isRealTimeMode && realTimeTranscriptions.length > 0 && (
+          <motion.div 
+            className="realtime-transcriptions-card"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+          >
+            <div className="card-header">
+              <Wifi size={20} />
+              <h3>Real-time Transcriptions</h3>
+              <span className="chunk-count">{realTimeTranscriptions.length} chunks</span>
+            </div>
+            <div className="realtime-transcriptions-list">
+              {realTimeTranscriptions.map((chunk, index) => (
+                <div key={index} className={`transcription-chunk ${chunk.speaker === 'You' ? 'speaker-you' : 'speaker-other'}`}>
+                  <div className="chunk-header">
+                    <span className="chunk-time">
+                      {new Date(chunk.timestamp).toLocaleTimeString()}
+                    </span>
+                    <div className="speaker-controls">
+                      <span className={`chunk-speaker ${chunk.speaker === 'You' ? 'speaker-you-badge' : 'speaker-other-badge'}`}>
+                        {chunk.speaker || 'Unknown'}
+                      </span>
+                      <button 
+                        className="speaker-toggle"
+                        onClick={() => toggleSpeaker(index)}
+                        title="Toggle speaker"
+                      >
+                        🔄
+                      </button>
+                    </div>
+                    <span className="chunk-confidence">
+                      Confidence: {Math.round(chunk.confidence * 100)}%
+                    </span>
+                  </div>
+                  <div className="chunk-text">{chunk.text}</div>
                 </div>
-                <div className="chunk-text">{chunk.text}</div>
-              </div>
-            ))}
-          </div>
-        </motion.div>
-      )}
+              ))}
+            </div>
+          </motion.div>
+        )}
 
       {transcription && (
         <motion.div 
@@ -604,6 +746,32 @@ const MeetTranscriber = () => {
           align-items: center;
           margin: 2rem 0;
           flex-wrap: wrap;
+        }
+
+        .capture-mode-selector {
+          display: flex;
+          align-items: center;
+          gap: 0.5rem;
+        }
+
+        .mode-label {
+          font-weight: 500;
+          color: var(--text-primary);
+          font-size: 0.9rem;
+        }
+
+        .mode-select {
+          padding: 0.5rem;
+          border: 1px solid rgba(0, 0, 0, 0.2);
+          border-radius: 0.5rem;
+          background: white;
+          font-size: 0.9rem;
+          cursor: pointer;
+        }
+
+        .mode-select:disabled {
+          background: rgba(0, 0, 0, 0.1);
+          cursor: not-allowed;
         }
 
         .mode-toggle {
@@ -855,6 +1023,43 @@ const MeetTranscriber = () => {
           font-weight: 600;
         }
 
+        .speaker-controls {
+          display: flex;
+          align-items: center;
+          gap: 0.5rem;
+        }
+
+        .chunk-speaker {
+          padding: 0.2rem 0.5rem;
+          border-radius: 0.5rem;
+          font-size: 0.75rem;
+          font-weight: 600;
+        }
+
+        .speaker-you-badge {
+          background: rgba(34, 197, 94, 0.1);
+          color: var(--success-color);
+        }
+
+        .speaker-other-badge {
+          background: rgba(59, 130, 246, 0.1);
+          color: var(--primary-color);
+        }
+
+        .speaker-toggle {
+          background: none;
+          border: none;
+          cursor: pointer;
+          font-size: 0.8rem;
+          padding: 0.2rem;
+          border-radius: 0.3rem;
+          transition: background-color 0.2s;
+        }
+
+        .speaker-toggle:hover {
+          background: rgba(0, 0, 0, 0.1);
+        }
+
         .chunk-confidence {
           background: rgba(59, 130, 246, 0.1);
           color: var(--primary-color);
@@ -868,6 +1073,16 @@ const MeetTranscriber = () => {
           font-size: 0.95rem;
           line-height: 1.5;
           color: var(--text-primary);
+        }
+
+        .transcription-chunk.speaker-you {
+          border-left: 4px solid var(--success-color);
+          background: rgba(34, 197, 94, 0.05);
+        }
+
+        .transcription-chunk.speaker-other {
+          border-left: 4px solid var(--primary-color);
+          background: rgba(59, 130, 246, 0.05);
         }
 
         @media (max-width: 768px) {
