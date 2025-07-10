@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Google Meet Audio Transcriber</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            color: white;
+        }
+        
+        .container {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 30px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+        }
+        
+        h1 {
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 2.5em;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+        }
+        
+        .status {
+            background: rgba(255, 255, 255, 0.2);
+            padding: 15px;
+            border-radius: 10px;
+            margin: 20px 0;
+            text-align: center;
+            font-weight: bold;
+            font-size: 1.1em;
+        }
+        
+        .button {
+            background: linear-gradient(45deg, #ff6b6b, #ee5a24);
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 25px;
+            font-size: 1.1em;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: block;
+            margin: 20px auto;
+            font-weight: bold;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        
+        .button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3);
+        }
+        
+        .button:disabled {
+            background: #666;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        .transcription {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 20px;
+            border-radius: 10px;
+            margin: 20px 0;
+            min-height: 100px;
+            white-space: pre-wrap;
+            font-family: 'Courier New', monospace;
+            font-size: 1.1em;
+            line-height: 1.6;
+        }
+        
+        .instructions {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 20px;
+            border-radius: 10px;
+            margin: 20px 0;
+        }
+        
+        .instructions h3 {
+            margin-top: 0;
+            color: #ffd700;
+        }
+        
+        .instructions ol {
+            margin: 0;
+            padding-left: 20px;
+        }
+        
+        .instructions li {
+            margin: 10px 0;
+            line-height: 1.5;
+        }
+        
+        .error {
+            background: rgba(255, 0, 0, 0.2);
+            border: 1px solid #ff0000;
+            color: #ffcccc;
+        }
+        
+        .success {
+            background: rgba(0, 255, 0, 0.2);
+            border: 1px solid #00ff00;
+            color: #ccffcc;
+        }
+        
+        .recording {
+            background: rgba(255, 165, 0, 0.2);
+            border: 1px solid #ffa500;
+            color: #ffd700;
+            animation: pulse 1s infinite;
+        }
+        
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.7; }
+            100% { opacity: 1; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎙️ Google Meet Audio Transcriber</h1>
+        
+        <div class="instructions">
+            <h3>📋 How to use:</h3>
+            <ol>
+                <li>Click "Start Recording" button</li>
+                <li>Select the Google Meet tab when prompted</li>
+                <li><strong>Important:</strong> Make sure to check "Share audio" when selecting the tab</li>
+                <li>The system will record for 5 seconds and transcribe the audio</li>
+                <li>View the transcription results below</li>
+            </ol>
+        </div>
+        
+        <button id="startBtn" class="button">🎙️ Start Recording</button>
+        
+        <div id="status" class="status">Ready to capture Google Meet audio</div>
+        
+        <div id="transcription" class="transcription">
+            Transcription will appear here...
+        </div>
+    </div>
+
+    <!-- Include Recorder.js for audio recording -->
+    <script src="https://cdn.jsdelivr.net/npm/recorder-js@1.0.7/dist/recorder.min.js"></script>
+    
+    <script>
+        let stream = null;
+        let recorder = null;
+        let audioContext = null;
+        let sourceNode = null;
+
+        document.getElementById("startBtn").onclick = async () => {
+            try {
+                console.log("🎙 Starting audio capture...");
+                
+                // Disable button during recording
+                const startBtn = document.getElementById("startBtn");
+                startBtn.disabled = true;
+                startBtn.textContent = "🎙️ Recording...";
+                
+                // Capture audio from the selected tab
+                stream = await navigator.mediaDevices.getDisplayMedia({
+                    video: true, // Required for tab audio in most browsers
+                    audio: {
+                        echoCancellation: false,
+                        noiseSuppression: false,
+                        autoGainControl: false
+                    }
+                });
+                
+                console.log("✅ Stream captured:", stream);
+                document.getElementById("status").textContent = "✅ Capturing Meet audio";
+                document.getElementById("status").className = "status success";
+
+                // Check if audio track exists
+                const audioTracks = stream.getAudioTracks();
+                if (audioTracks.length === 0) {
+                    throw new Error("No audio track found. Make sure to share audio when selecting the tab.");
+                }
+
+                // Set up AudioContext and Recorder
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                sourceNode = audioContext.createMediaStreamSource(stream);
+
+                // Ensure Recorder.js is available
+                if (typeof Recorder === "undefined") {
+                    throw new Error("Recorder.js not loaded");
+                }
+
+                recorder = new Recorder(sourceNode, {
+                    numChannels: 1,
+                });
+
+                // Start recording
+                recorder.record();
+                console.log("🎙 Recording started...");
+                document.getElementById("status").textContent = "🎙 Recording for 5 seconds...";
+                document.getElementById("status").className = "status recording";
+
+                // Stop after 5 seconds and process
+                setTimeout(() => {
+                    console.log("⏹ Stopping recording...");
+                    recorder.stop();
+                    document.getElementById("status").textContent = "🔄 Processing audio...";
+                    document.getElementById("status").className = "status";
+                    
+                    recorder.exportWAV(async (blob) => {
+                        console.log("📄 Audio blob created:", blob.size, "bytes");
+                        
+                        // Convert WAV blob to correct format for Hugging Face
+                        const formData = new FormData();
+                        formData.append("audio", blob, "audio.wav");
+
+                        try {
+                            document.getElementById("status").textContent = "🤖 Sending to AI for transcription...";
+                            
+                            console.log("📡 Sending request to server...");
+                            
+                            const response = await fetch("/transcribe", {
+                                method: "POST",
+                                body: formData,
+                            });
+
+                            console.log("📡 Response status:", response.status);
+
+                            if (!response.ok) {
+                                const errorText = await response.text();
+                                console.error("❌ API Error:", errorText);
+                                throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+                            }
+
+                            const result = await response.json();
+                            console.log("📝 Transcription result:", result);
+
+                            if (result.text) {
+                                document.getElementById("transcription").textContent = result.text;
+                                document.getElementById("status").textContent = "✅ Transcription complete!";
+                                document.getElementById("status").className = "status success";
+                            } else if (result.error) {
+                                document.getElementById("transcription").textContent = `❌ API Error: ${result.error}`;
+                                document.getElementById("status").textContent = "❌ Transcription failed";
+                                document.getElementById("status").className = "status error";
+                            } else {
+                                document.getElementById("transcription").textContent = "❌ No transcription returned";
+                                document.getElementById("status").textContent = "❌ No result";
+                                document.getElementById("status").className = "status error";
+                            }
+                        } catch (err) {
+                            console.error("❌ Transcription failed:", err);
+                            document.getElementById("transcription").textContent = `❌ Transcription failed: ${err.message}`;
+                            document.getElementById("status").textContent = "❌ Error occurred";
+                            document.getElementById("status").className = "status error";
+                        }
+
+                        // Clean up
+                        if (stream) {
+                            stream.getTracks().forEach(track => track.stop());
+                        }
+                        if (audioContext) {
+                            audioContext.close();
+                        }
+                        if (recorder) {
+                            recorder.clear();
+                        }
+                        
+                        // Re-enable button
+                        startBtn.disabled = false;
+                        startBtn.textContent = "🎙️ Start Recording";
+                    });
+                }, 5000);
+            } catch (err) {
+                console.error("❌ Failed to capture audio:", err);
+                document.getElementById("status").textContent = `❌ Capture failed: ${err.message}`;
+                document.getElementById("status").className = "status error";
+                document.getElementById("transcription").textContent = "❌ Setup failed";
+                
+                // Re-enable button
+                const startBtn = document.getElementById("startBtn");
+                startBtn.disabled = false;
+                startBtn.textContent = "🎙️ Start Recording";
+            }
+        };
+
+        console.log("🚀 Script loaded successfully!");
+    </script>
+</body>
+</html> 

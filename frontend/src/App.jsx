@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Brain, AlertCircle, Loader, Phone, Upload } from 'lucide-react';
+import { Brain, AlertCircle, Loader, Phone, Upload, Video } from 'lucide-react';
 import AudioUploader from './components/AudioUploader';
 import TranscriptionDisplay from './components/TranscriptionDisplay';
 import InsightsDisplay from './components/InsightsDisplay';
 import LiveCallInterface from './components/LiveCallInterface';
 import TestInstructions from './components/TestInstructions';
+import MeetTranscriber from './components/MeetTranscriber';
 import './App.css';
 
 function App() {
@@ -13,7 +14,7 @@ function App() {
   const [transcription, setTranscription] = useState('');
   const [insights, setInsights] = useState(null);
   const [error, setError] = useState('');
-  const [mode, setMode] = useState('upload'); // 'upload' or 'live'
+  const [mode, setMode] = useState('upload'); // 'upload', 'live', or 'meet'
 
   const handleFileUpload = async (file) => {
     console.log('File uploaded:', file);
@@ -93,6 +94,13 @@ function App() {
                 <Phone size={20} />
                 Live Call
               </button>
+              <button 
+                className={`toggle-btn ${mode === 'meet' ? 'active' : ''}`}
+                onClick={() => setMode('meet')}
+              >
+                <Video size={20} />
+                Google Meet
+              </button>
             </div>
           </motion.div>
 
@@ -157,7 +165,7 @@ function App() {
                   )}
                 </AnimatePresence>
               </motion.div>
-            ) : (
+            ) : mode === 'live' ? (
               <motion.div 
                 key="live-mode"
                 initial={{ opacity: 0, x: 20 }}
@@ -167,6 +175,16 @@ function App() {
               >
                 <TestInstructions />
                 <LiveCallInterface />
+              </motion.div>
+            ) : (
+              <motion.div 
+                key="meet-mode"
+                initial={{ opacity: 0, x: 20 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -20 }}
+                transition={{ duration: 0.3 }}
+              >
+                <MeetTranscriber />
               </motion.div>
             )}
           </AnimatePresence>
