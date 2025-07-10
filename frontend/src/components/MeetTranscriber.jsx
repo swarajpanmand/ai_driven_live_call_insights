@@ -1,18 +1,88 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Mic, Square, Download, AlertCircle, CheckCircle, Clock } from 'lucide-react';
+import { Mic, Square, Download, AlertCircle, CheckCircle, Clock, Wifi, WifiOff } from 'lucide-react';
 
 const MeetTranscriber = () => {
   const [isRecording, setIsRecording] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [transcription, setTranscription] = useState('');
+  const [realTimeTranscriptions, setRealTimeTranscriptions] = useState([]);
   const [error, setError] = useState('');
   const [status, setStatus] = useState('Ready to capture Google Meet audio');
+  const [isRealTimeMode, setIsRealTimeMode] = useState(false);
+  const [wsConnected, setWsConnected] = useState(false);
+  const [isRealTimeActive, setIsRealTimeActive] = useState(false);
   
   const streamRef = useRef(null);
   const recorderRef = useRef(null);
   const audioContextRef = useRef(null);
   const sourceNodeRef = useRef(null);
+  const wsRef = useRef(null);
+  const intervalRef = useRef(null);
+
+  // WebSocket connection for real-time updates
+  useEffect(() => {
+    let reconnectTimeout;
+    
+    const connectWebSocket = () => {
+      try {
+        console.log('🔌 Attempting WebSocket connection...');
+        const ws = new WebSocket('ws://localhost:5000');
+        wsRef.current = ws;
+
+        ws.onopen = () => {
+          console.log('🔌 WebSocket connected successfully');
+          setWsConnected(true);
+          setError(''); // Clear any connection errors
+        };
+
+        ws.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data);
+            console.log('📨 Received WebSocket message:', data);
+            if (data.type === 'transcription') {
+              setRealTimeTranscriptions(prev => [...prev, data]);
+              setTranscription(prev => prev + (prev ? '\n' : '') + data.text);
+            }
+          } catch (err) {
+            console.error('❌ Error parsing WebSocket message:', err);
+          }
+        };
+
+        ws.onclose = (event) => {
+          console.log('🔌 WebSocket disconnected:', event.code, event.reason);
+          setWsConnected(false);
+          
+          // Only attempt to reconnect if not a clean close
+          if (event.code !== 1000) {
+            console.log('🔄 Attempting to reconnect in 3 seconds...');
+            reconnectTimeout = setTimeout(connectWebSocket, 3000);
+          }
+        };
+
+        ws.onerror = (error) => {
+          console.error('❌ WebSocket error:', error);
+          setWsConnected(false);
+        };
+      } catch (err) {
+        console.error('❌ Failed to connect WebSocket:', err);
+        setWsConnected(false);
+        setError('WebSocket connection failed');
+      }
+    };
+
+    // Initial connection
+    connectWebSocket();
+
+    return () => {
+      if (reconnectTimeout) {
+        clearTimeout(reconnectTimeout);
+      }
+      if (wsRef.current) {
+        wsRef.current.close(1000, 'Component unmounting');
+      }
+    };
+  }, []);
 
   const startRecording = async () => {
     try {
@@ -20,6 +90,7 @@ const MeetTranscriber = () => {
       setIsRecording(true);
       setError('');
       setTranscription('');
+      setRealTimeTranscriptions([]);
       setStatus('Capturing Meet audio...');
       
       // Capture audio from the selected tab
@@ -63,7 +134,25 @@ const MeetTranscriber = () => {
       // Start recording
       recorder.record();
       console.log("🎙 Recording started...");
-      setStatus('🎙 Recording... Click "Stop Recording" when done');
+      
+      if (isRealTimeMode) {
+        console.log("🎙 Starting in REAL-TIME mode");
+        setStatus('🎙 Real-time recording... Sending data every 5 seconds');
+        // Start the interval after a short delay to ensure recording is active
+        setTimeout(() => {
+          // Check if we're still recording and have a recorder
+          if (recorderRef.current) {
+            console.log("✅ Starting real-time transcription after delay");
+            setIsRealTimeActive(true);
+            startRealTimeTranscription();
+          } else {
+            console.log("❌ Recorder not available after delay");
+          }
+        }, 1000);
+      } else {
+        console.log("🎙 Starting in REGULAR mode");
+        setStatus('🎙 Recording... Click "Stop Recording" when done');
+      }
       
     } catch (err) {
       console.error("❌ Failed to capture audio:", err);
@@ -73,12 +162,114 @@ const MeetTranscriber = () => {
     }
   };
 
+  const startRealTimeTranscription = () => {
+    console.log("🚀 Starting real-time transcription with 5-second intervals");
+    
+    // Send audio chunks every 5 seconds for real-time transcription
+    intervalRef.current = setInterval(async () => {
+      console.log("⏰ Interval triggered at", new Date().toLocaleTimeString());
+      console.log("📊 Recorder state:", !!recorderRef.current);
+      
+      if (!recorderRef.current) {
+        console.log("❌ Recorder not available, skipping chunk");
+        return;
+      }
+      
+      // Don't check isRecording state here since it might be stale
+      // Just check if we have a valid recorder
+      
+      try {
+        console.log("🔄 Processing real-time audio chunk at", new Date().toLocaleTimeString());
+        
+        // Check if recorder is actually recording before stopping
+        if (!recorderRef.current.recording) {
+          console.log("⚠️ Recorder not actively recording, restarting");
+          recorderRef.current.record();
+          return;
+        }
+        
+        // Stop current recording to export
+        recorderRef.current.stop();
+        
+        recorderRef.current.exportWAV(async (blob) => {
+          console.log("📄 Real-time audio blob created:", blob.size, "bytes");
+          
+          if (blob.size < 1000) {
+            console.log("⚠️ Audio blob too small, skipping");
+            // Restart recording immediately
+            if (recorderRef.current) {
+              recorderRef.current.clear();
+              recorderRef.current.record();
+              console.log("🎙 Restarted recording after small blob");
+            }
+            return;
+          }
+          
+          const formData = new FormData();
+          formData.append("audio", blob, "audio.wav");
+
+          try {
+            setStatus(`🔄 Sending chunk to server at ${new Date().toLocaleTimeString()}`);
+            
+            const response = await fetch("http://localhost:5000/transcribe-stream", {
+              method: "POST",
+              body: formData,
+            });
+
+            if (!response.ok) {
+              const errorText = await response.text();
+              console.error("❌ Real-time API Error:", errorText);
+              setStatus(`❌ API Error: ${response.status}`);
+            } else {
+              const result = await response.json();
+              console.log("📝 Real-time transcription chunk:", result);
+              
+              // Update status to show processing
+              setStatus(`✅ Chunk processed at ${new Date().toLocaleTimeString()}`);
+            }
+          } catch (err) {
+            console.error("❌ Real-time transcription failed:", err);
+            setStatus(`❌ Network error: ${err.message}`);
+          }
+          
+          // Restart recording for the next chunk
+          if (recorderRef.current) {
+            recorderRef.current.clear();
+            recorderRef.current.record();
+            console.log("🎙 Restarted recording for next chunk");
+          }
+        });
+        
+      } catch (err) {
+        console.error("❌ Real-time processing error:", err);
+        setStatus(`❌ Processing error: ${err.message}`);
+        
+        // Try to restart recording even if there was an error
+        if (recorderRef.current) {
+          recorderRef.current.clear();
+          recorderRef.current.record();
+          console.log("🎙 Restarted recording after error");
+        }
+      }
+    }, 5000); // 5 seconds interval
+  };
+
   const stopRecording = () => {
     if (!recorderRef.current) return;
     
     console.log("⏹ Stopping recording...");
+    
+    // Clear real-time interval if active
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+      console.log("🧹 Cleared real-time interval");
+    }
+    
+    setIsRealTimeActive(false);
+    
     recorderRef.current.stop();
-    setStatus('🔄 Processing audio...');
+    setStatus('🔄 Processing final audio...');
     setIsProcessing(true);
     
     recorderRef.current.exportWAV(async (blob) => {
@@ -110,7 +301,7 @@ const MeetTranscriber = () => {
         console.log("📝 Transcription result:", result);
 
         if (result.text) {
-          setTranscription(result.text);
+          setTranscription(prev => prev + (prev ? '\n' : '') + result.text);
           setStatus('✅ Transcription complete!');
         } else if (result.error) {
           setError(`API Error: ${result.error}`);
@@ -132,6 +323,15 @@ const MeetTranscriber = () => {
   };
 
   const cleanup = () => {
+    // Clear real-time interval
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+      console.log("🧹 Cleared real-time interval");
+    }
+    
+    setIsRealTimeActive(false);
+    
     if (streamRef.current) {
       streamRef.current.getTracks().forEach(track => track.stop());
       streamRef.current = null;
@@ -183,9 +383,12 @@ const MeetTranscriber = () => {
         </div>
         <div className="instructions-content">
           <ol>
+            <li>Toggle "Real-time Mode" for live transcription updates (optional)</li>
+            <li>Ensure WebSocket connection is established (green "Connected" indicator)</li>
             <li>Click the "Start Recording" button below</li>
             <li>Select the Google Meet tab when prompted by your browser</li>
             <li><strong>Important:</strong> Make sure to check "Share audio" when selecting the tab</li>
+            <li>In real-time mode, transcriptions will appear every 5 seconds</li>
             <li>Click "Stop Recording" when you want to end the recording</li>
             <li>View the transcription results in the panel below</li>
           </ol>
@@ -193,6 +396,39 @@ const MeetTranscriber = () => {
       </div>
 
       <div className="controls-section">
+        <div className="mode-toggle">
+          <label className="toggle-label">
+            <input
+              type="checkbox"
+              checked={isRealTimeMode}
+              onChange={(e) => setIsRealTimeMode(e.target.checked)}
+              disabled={isRecording}
+            />
+            <span className="toggle-text">Real-time Mode</span>
+          </label>
+        </div>
+
+        <div className="connection-status">
+          {wsConnected ? (
+            <div className="status-connected">
+              <Wifi size={16} />
+              <span>Connected</span>
+            </div>
+          ) : (
+            <div className="status-disconnected">
+              <WifiOff size={16} />
+              <span>Disconnected</span>
+            </div>
+          )}
+        </div>
+
+        {isRealTimeMode && isRealTimeActive && (
+          <div className="realtime-indicator">
+            <div className="pulse-dot"></div>
+            <span>Real-time Active</span>
+          </div>
+        )}
+
         <motion.button
           className={`record-button ${isRecording ? 'recording' : ''}`}
           onClick={isRecording ? stopRecording : startRecording}
@@ -249,6 +485,35 @@ const MeetTranscriber = () => {
         </motion.div>
       )}
 
+      {isRealTimeMode && realTimeTranscriptions.length > 0 && (
+        <motion.div 
+          className="realtime-transcriptions-card"
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+        >
+          <div className="card-header">
+            <Wifi size={20} />
+            <h3>Real-time Transcriptions</h3>
+            <span className="chunk-count">{realTimeTranscriptions.length} chunks</span>
+          </div>
+          <div className="realtime-transcriptions-list">
+            {realTimeTranscriptions.map((chunk, index) => (
+              <div key={index} className="transcription-chunk">
+                <div className="chunk-header">
+                  <span className="chunk-time">
+                    {new Date(chunk.timestamp).toLocaleTimeString()}
+                  </span>
+                  <span className="chunk-confidence">
+                    Confidence: {Math.round(chunk.confidence * 100)}%
+                  </span>
+                </div>
+                <div className="chunk-text">{chunk.text}</div>
+              </div>
+            ))}
+          </div>
+        </motion.div>
+      )}
+
       {transcription && (
         <motion.div 
           className="transcription-card"
@@ -265,7 +530,7 @@ const MeetTranscriber = () => {
         </motion.div>
       )}
 
-      <style jsx>{`
+      <style>{`
         .meet-transcriber {
           background: rgba(255, 255, 255, 0.95);
           border-radius: 1.5rem;
@@ -336,8 +601,76 @@ const MeetTranscriber = () => {
           display: flex;
           gap: 1rem;
           justify-content: center;
+          align-items: center;
           margin: 2rem 0;
           flex-wrap: wrap;
+        }
+
+        .mode-toggle {
+          display: flex;
+          align-items: center;
+        }
+
+        .toggle-label {
+          display: flex;
+          align-items: center;
+          gap: 0.5rem;
+          cursor: pointer;
+          font-weight: 500;
+          color: var(--text-primary);
+        }
+
+        .toggle-label input[type="checkbox"] {
+          width: 1.2rem;
+          height: 1.2rem;
+          accent-color: var(--primary-color);
+        }
+
+        .toggle-text {
+          font-size: 0.9rem;
+        }
+
+        .connection-status {
+          display: flex;
+          align-items: center;
+          gap: 0.5rem;
+          padding: 0.5rem 1rem;
+          border-radius: 0.5rem;
+          font-size: 0.9rem;
+          font-weight: 500;
+        }
+
+        .status-connected {
+          background: rgba(34, 197, 94, 0.1);
+          color: var(--success-color);
+          border: 1px solid rgba(34, 197, 94, 0.3);
+        }
+
+        .status-disconnected {
+          background: rgba(239, 68, 68, 0.1);
+          color: var(--error-color);
+          border: 1px solid rgba(239, 68, 68, 0.3);
+        }
+
+        .realtime-indicator {
+          display: flex;
+          align-items: center;
+          gap: 0.5rem;
+          padding: 0.5rem 1rem;
+          background: rgba(59, 130, 246, 0.1);
+          color: var(--primary-color);
+          border: 1px solid rgba(59, 130, 246, 0.3);
+          border-radius: 0.5rem;
+          font-size: 0.9rem;
+          font-weight: 500;
+        }
+
+        .pulse-dot {
+          width: 8px;
+          height: 8px;
+          background: var(--primary-color);
+          border-radius: 50%;
+          animation: pulse 1s infinite;
         }
 
         .record-button, .download-button {
@@ -466,6 +799,75 @@ const MeetTranscriber = () => {
           overflow-y: auto;
           color: var(--text-primary);
           border: 1px solid rgba(0, 0, 0, 0.1);
+        }
+
+        .realtime-transcriptions-card {
+          background: rgba(255, 255, 255, 0.5);
+          border-radius: 1rem;
+          padding: 1.5rem;
+          margin: 2rem 0;
+          border: 1px solid rgba(0, 0, 0, 0.1);
+        }
+
+        .card-header {
+          display: flex;
+          align-items: center;
+          gap: 0.75rem;
+          margin-bottom: 1rem;
+          color: var(--text-primary);
+        }
+
+        .chunk-count {
+          margin-left: auto;
+          background: var(--primary-color);
+          color: white;
+          padding: 0.25rem 0.75rem;
+          border-radius: 1rem;
+          font-size: 0.8rem;
+          font-weight: 600;
+        }
+
+        .realtime-transcriptions-list {
+          max-height: 300px;
+          overflow-y: auto;
+          display: flex;
+          flex-direction: column;
+          gap: 1rem;
+        }
+
+        .transcription-chunk {
+          background: rgba(0, 0, 0, 0.03);
+          border-radius: 0.75rem;
+          padding: 1rem;
+          border: 1px solid rgba(0, 0, 0, 0.1);
+        }
+
+        .chunk-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          margin-bottom: 0.5rem;
+          font-size: 0.85rem;
+          color: var(--text-secondary);
+        }
+
+        .chunk-time {
+          font-weight: 600;
+        }
+
+        .chunk-confidence {
+          background: rgba(59, 130, 246, 0.1);
+          color: var(--primary-color);
+          padding: 0.2rem 0.5rem;
+          border-radius: 0.5rem;
+          font-size: 0.75rem;
+        }
+
+        .chunk-text {
+          font-family: 'Courier New', monospace;
+          font-size: 0.95rem;
+          line-height: 1.5;
+          color: var(--text-primary);
         }
 
         @media (max-width: 768px) {
