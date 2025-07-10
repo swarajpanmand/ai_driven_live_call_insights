@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebSocket Streaming Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            color: white;
+        }
+        
+        .container {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 30px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+        }
+        
+        h1 {
+            text-align: center;
+            margin-bottom: 30px;
+            color: #ffd700;
+        }
+        
+        .status {
+            background: rgba(255, 255, 255, 0.2);
+            padding: 15px;
+            border-radius: 10px;
+            margin: 20px 0;
+            text-align: center;
+            font-weight: bold;
+        }
+        
+        .button {
+            background: linear-gradient(45deg, #ff6b6b, #ee5a24);
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 25px;
+            font-size: 1.1em;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: block;
+            margin: 20px auto;
+            font-weight: bold;
+        }
+        
+        .button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3);
+        }
+        
+        .button:disabled {
+            background: #666;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        .log {
+            background: rgba(0, 0, 0, 0.3);
+            padding: 20px;
+            border-radius: 10px;
+            margin: 20px 0;
+            max-height: 300px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 0.9em;
+        }
+        
+        .connected { color: #4CAF50; }
+        .disconnected { color: #f44336; }
+        .streaming { color: #2196F3; }
+        .transcription { color: #FF9800; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔌 WebSocket Streaming Test</h1>
+        
+        <div class="status" id="status">Disconnected</div>
+        
+        <button id="connectBtn" class="button">Connect WebSocket</button>
+        <button id="startStreamingBtn" class="button" disabled>Start Streaming</button>
+        <button id="stopStreamingBtn" class="button" disabled>Stop Streaming</button>
+        <button id="disconnectBtn" class="button" disabled>Disconnect</button>
+        
+        <div class="log" id="log">
+            <div>WebSocket streaming test ready...</div>
+        </div>
+    </div>
+
+    <script>
+        let ws = null;
+        let isStreaming = false;
+        
+        const statusEl = document.getElementById('status');
+        const logEl = document.getElementById('log');
+        const connectBtn = document.getElementById('connectBtn');
+        const startStreamingBtn = document.getElementById('startStreamingBtn');
+        const stopStreamingBtn = document.getElementById('stopStreamingBtn');
+        const disconnectBtn = document.getElementById('disconnectBtn');
+        
+        function log(message, type = 'info') {
+            const timestamp = new Date().toLocaleTimeString();
+            const logEntry = document.createElement('div');
+            logEntry.className = type;
+            logEntry.textContent = `[${timestamp}] ${message}`;
+            logEl.appendChild(logEntry);
+            logEl.scrollTop = logEl.scrollHeight;
+        }
+        
+        function updateStatus(message, className = '') {
+            statusEl.textContent = message;
+            statusEl.className = `status ${className}`;
+        }
+        
+        function updateButtons() {
+            connectBtn.disabled = !!ws;
+            startStreamingBtn.disabled = !ws || isStreaming;
+            stopStreamingBtn.disabled = !ws || !isStreaming;
+            disconnectBtn.disabled = !ws;
+        }
+        
+        connectBtn.onclick = () => {
+            log('Connecting to WebSocket server...', 'info');
+            
+            ws = new WebSocket('ws://localhost:5000');
+            
+            ws.onopen = () => {
+                log('✅ WebSocket connected!', 'connected');
+                updateStatus('Connected', 'connected');
+                updateButtons();
+            };
+            
+            ws.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    log(`📨 Received: ${data.type}`, 'streaming');
+                    
+                    if (data.type === 'streaming_started') {
+                        log('🎙 Streaming started on server', 'streaming');
+                    } else if (data.type === 'streaming_stopped') {
+                        log('⏹ Streaming stopped on server', 'streaming');
+                    } else if (data.type === 'transcription') {
+                        log(`📝 [${data.speaker}]: ${data.text}`, 'transcription');
+                    }
+                } catch (err) {
+                    log(`❌ Error parsing message: ${err.message}`, 'disconnected');
+                }
+            };
+            
+            ws.onclose = () => {
+                log('🔌 WebSocket disconnected', 'disconnected');
+                updateStatus('Disconnected', 'disconnected');
+                ws = null;
+                isStreaming = false;
+                updateButtons();
+            };
+            
+            ws.onerror = (error) => {
+                log(`❌ WebSocket error: ${error}`, 'disconnected');
+            };
+        };
+        
+        startStreamingBtn.onclick = () => {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                log('🎙 Starting streaming...', 'streaming');
+                ws.send(JSON.stringify({ type: 'start_streaming' }));
+                isStreaming = true;
+                updateButtons();
+                updateStatus('Streaming Active', 'streaming');
+            }
+        };
+        
+        stopStreamingBtn.onclick = () => {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                log('⏹ Stopping streaming...', 'streaming');
+                ws.send(JSON.stringify({ type: 'stop_streaming' }));
+                isStreaming = false;
+                updateButtons();
+                updateStatus('Connected', 'connected');
+            }
+        };
+        
+        disconnectBtn.onclick = () => {
+            if (ws) {
+                log('🔌 Disconnecting...', 'info');
+                ws.close();
+            }
+        };
+        
+        // Initial button state
+        updateButtons();
+        log('Ready to test WebSocket streaming!', 'info');
+    </script>
+</body>
+</html> 
